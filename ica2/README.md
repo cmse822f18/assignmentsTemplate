@@ -31,4 +31,4 @@ Within your group, pick a partner (or two). One partner will the be the "driver"
 
 ### What to turn-in
 
-To your git repo, in the `ica2` directory, commit your code for performing the matrix-matrix multiply performance measurements, the plot of your results, and a brief write-up (in plain text or markdown) addressing the above questions and discussing your results.
+To your git repo, in the `ica2` directory, commit your code for performing the matrix-matrix multiply performance measurements, the plot of your results, and a brief write-up (in plain text or markdown) addressing the above questions and discussing your results. Your final write-up and code are due in one week, on 9/11.
