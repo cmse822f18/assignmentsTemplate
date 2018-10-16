@@ -1,0 +1,347 @@
+
+module diffusionKernels
+  use cudafor
+
+  real, constant :: c_a, c_b, c_c
+  integer, parameter :: NG = 2
+contains 
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! Do one diffusion step, on the host in host memory
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  subroutine host_diffusion( u, u_new, dx, dt)
+    implicit none
+    real :: u(:), u_new(:)
+    real, value :: dx, dt
+    integer :: i, n
+    n = size(u)
+
+    !First, do the diffusion step on the interior points
+    do i = NG+1, n-NG
+      u_new(i) = u(i) + dt/(dx*dx) * (     &
+                      - 1.e0/12.e0 * u(i-2)  &
+                      + 4.e0/3.e0  * u(i-1)  &
+                      - 5.e0/2.e0  * u(i)    &
+                      + 4.e0/3.e0  * u(i+1)  &
+                      - 1.e0/12.e0 * u(i+2))
+    end do
+
+    !Apply the dirichlet boundary conditio
+    u_new(1) = -u_new(NG+2)
+    u_new(2) = -u_new(NG+1)
+
+    u_new(n-1) = -u_new(n-NG)
+    u_new(n)   = -u_new(n-NG-1)
+    
+  end subroutine host_diffusion
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! Do one diffusion step, using cuda
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  attributes(global) subroutine cuda_diffusion( u, u_new, n)
+    implicit none
+    real :: u(:), u_new(:)
+    integer :: n
+
+    !Determine your thread index
+
+    !First, do the diffusion step
+
+    !Apply the dirichlet boundary conditions
+    
+  end subroutine cuda_diffusion
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! Do one diffusion step, using cuda
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  attributes(global) subroutine shared_diffusion( u, u_new, n)
+    implicit none
+    real :: u(:), u_new(:)
+    integer :: n
+    !Allocate the shared memory
+    !FIXME
+
+    !Fill shared memory with the data needed from global memory
+    !HINT: 
+    !What data does each block need from global memory?
+    !When do the threads in the block need to sync?
+    !FIXME
+
+    !Determine your thread index
+
+    !First, do the diffusion step
+
+    !Apply the dirichlet boundary conditions
+    
+  end subroutine shared_diffusion
+
+  subroutine setDiffusionConstants(dx,dt)
+    implicit none
+    real :: dx,dt
+
+    c_a =  1./12. * dt/dx**2
+    c_b =  4./3.  * dt/dx**2
+    c_c =  5./2.  * dt/dx**2
+
+  end subroutine setDiffusionConstants
+
+
+
+end module diffusionKernels
+
+program diffusion
+  use diffusionKernels
+  use cudafor
+
+  implicit none
+  integer, parameter :: n_steps = 1000000
+  integer, parameter :: n = 2**11+2*NG
+
+  !Block and grid dimensions
+  integer, parameter :: blockDim = 256
+  integer, parameter :: gridDim = (n-2*NG)/blockDim
+
+  !Data dump parameters
+  logical, parameter :: outputData = .TRUE.
+  integer, parameter :: outputPeriod = n_steps/10
+
+
+  !Physical dimensions of the domain
+  real, parameter :: PI = 3.1415926535897932
+  real, parameter :: L = 2*PI
+  real, parameter :: dx = L/(n-2*NG-1)
+  real, parameter :: dt = 0.25*dx*dx
+
+
+  !Data on the host
+  real :: initial_u(N), host_u(N), host_u2(N), &
+          temp(N), cuda_u(N), shared_u(N)
+
+  !Data on the device
+  !FIXME allocate d_u and d_u2 of size N on the device
+
+  !iterators
+  integer :: i,j,k
+
+  !host timers
+  real :: start,finish
+
+  !cuda status
+  integer :: istat
+
+  !cuda timers
+  type(cudaEvent) :: startEvent,finishEvent
+  real :: milliseconds
+
+  !filename
+  character(LEN=64) :: filename
+
+  !Initialize with a periodic sin wave that starts after the left hand
+  !boundaries and ends just before the right hand boundaries
+  do i = NG+1, n-NG
+    initial_u(i) =  SIN( 2*PI/L*(i-NG-1)*dx)
+  end do
+
+  !Apply the dirichlet boundary conditio
+  initial_u(1) = -initial_u(NG+2)
+  initial_u(2) = -initial_u(NG+1)
+
+  initial_u(n-1) = -initial_u(n-NG)
+  initial_u(n)   = -initial_u(n-NG-1)
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! Test the host kernel for diffusion
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !Initialize the host memory
+  do j = 1, n
+    host_u(j) = initial_u(j)
+  end do
+
+  !Output the initial data
+  open(10,file='data/host_uInitial.dat')
+  write(10,'(ES15.8)') ( host_u(k), k = 1,n)
+  close(10)
+
+  !Perform n_steps of diffusion
+  call cpu_time(start)
+  do j = 1, n_steps
+
+    !Do Output
+    if ( outputData .and. MODULO(j-1,outputPeriod) == 0) then 
+      write(filename,'("data/host_u"(I0.8)".dat")') j-1
+      open(10,file=filename)
+      write(10,'(ES15.8)') ( host_u(k), k = 1,n)
+      close(10)
+    end if
+
+    call host_diffusion(host_u,host_u2,dx,dt)
+
+    !Switch the buffer with the original u
+    temp = host_u
+    host_u = host_u2
+    host_u2 = temp
+  end do
+  call cpu_time(finish)
+
+  !Output the final data
+  open(10,file='data/host_uFinal.dat')
+  write(10,'(ES15.8)') ( host_u(k), k = 1,n)
+  close(10)
+
+  print *,"Host function took: ", (finish-start)*1d3/n_steps,"ms per step"
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! Test the cuda kernel for diffision
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !Set diffusion coefficients in cuda constant memory
+  call setDiffusionConstants(dx,dt)
+
+  !Create the cuda event timers
+  istat = cudaEventCreate(startEvent)
+  istat = cudaEventCreate(finishEvent)
+
+  !Initialize the copy of the cuda memory on host
+  do j = 1, n
+    cuda_u(j) = initial_u(j)
+  end do
+
+  !Output the initial data
+  open(10,file='data/cuda_uInitial.dat')
+  write(10,'(ES15.8)') ( cuda_u(k), k = 1,n)
+  close(10)
+
+  !Copy cuda_u into d_u 
+  !FIXME 
+
+  !Perform n_steps of diffusion
+  istat = cudaEventRecord(startEvent,0)
+  do j = 1, n_steps
+
+    if ( outputData .and. MODULO(j-1,outputPeriod) == 0) then 
+      !Do Output
+
+      !Copy d_u into cuda_u 
+      !FIXME 
+
+      write(filename,'("data/cuda_u"(I0.8)".dat")') j-1
+      open(10,file=filename)
+      write(10,'(ES15.8)') ( cuda_u(k), k = 1,n)
+      close(10)
+    end if
+
+    !Call the cuda_diffusion kernel 
+    !FIXME
+
+    !Switch the buffer with the original u
+    !FIXME
+    !NOTE: I'm actually unsure if the same approach I used in the C 
+    !version and host will work here. Let me know how it goes!
+
+  end do
+  istat = cudaEventRecord(finishEvent,0)
+
+  !Copy d_u into cuda_u 
+  !FIXME 
+
+  !Output the final data
+  open(10,file='data/cuda_uFinal.dat')
+  write(10,'(ES15.8)') ( cuda_u(k), k = 1,n)
+  close(10)
+
+
+  !Wait for the kernels to finish
+  istat = cudaEventSynchronize(finishEvent)
+  istat = cudaEventElapsedTime(milliseconds,startEvent,finishEvent)
+
+  print *,"CUDA Kernel took: ", milliseconds/n_steps,"ms per step"
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! Test the cuda kernel for diffision with shared memory
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !Initialize the copy of the cuda memory on host
+  do j = 1, n
+    shared_u(j) = initial_u(j)
+  end do
+
+  !Output the initial data
+  open(10,file='data/shared_uInitial.dat')
+  write(10,'(ES15.8)') ( shared_u(k), k = 1,n)
+  close(10)
+
+  !Copy shared_u into d_u 
+  !FIXME 
+
+  !Perform n_steps of diffusion
+  istat = cudaEventRecord(startEvent,0)
+  do j = 1, n_steps
+
+    if ( outputData .and. MODULO(j-1,outputPeriod) == 0) then 
+      !Do Output
+
+      !Copy d_u into shared_u 
+      !FIXME 
+
+      write(filename,'("data/shared_u"(I0.8)".dat")') j-1
+      open(10,file=filename)
+      write(10,'(ES15.8)') ( shared_u(k), k = 1,n)
+      close(10)
+    end if
+
+    !Call the shared_diffusion kernel 
+    !FIXME
+
+    !Switch the buffer with the original u
+    !FIXME
+
+  end do
+  istat = cudaEventRecord(finishEvent,0)
+
+  !Copy d_u into shared_u 
+  !FIXME 
+
+  !Output the final data
+  open(10,file='data/shared_uFinal.dat')
+  write(10,'(ES15.8)') ( shared_u(k), k = 1,n)
+  close(10)
+
+
+  !Wait for the kernels and timing to finish
+  istat = cudaEventSynchronize(finishEvent)
+  istat = cudaEventElapsedTime(milliseconds,startEvent,finishEvent)
+
+  print *,"Shared Memory Kernel took: ", milliseconds/n_steps,"ms per step"
+  
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! Test the cuda kernel for diffision with shared memory
+  ! with excessive memcpy's
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !Initialize the copy of the cuda memory on host
+  do j = 1, n
+    shared_u(j) = initial_u(j)
+  end do
+
+  !Perform n_steps of diffusion
+  istat = cudaEventRecord(startEvent,0)
+  do j = 1, n_steps
+
+    !Copy shared_u into d_u 
+    !FIXME 
+
+    !Call the shared_diffusion kernel 
+    !FIXME
+
+    !Copy d_u2 into d_shared
+    !FIXME 
+
+  end do
+  istat = cudaEventRecord(finishEvent,0)
+
+  !Wait for the kernels and timing to finish
+  istat = cudaEventSynchronize(finishEvent)
+  istat = cudaEventElapsedTime(milliseconds,startEvent,finishEvent)
+
+  print *,"Excessive memcpy's took: ", milliseconds/n_steps,"ms per step"
+end program diffusion
