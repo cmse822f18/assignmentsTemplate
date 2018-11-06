@@ -1,0 +1,1 @@
+Use this directory for all of the material relating to your final project! Do _NOT_ commit large files, such as poster documents or data tables! Committing pdf's of your, e.g., poster and report are fine. 
